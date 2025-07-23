@@ -8,44 +8,55 @@ const { loadModels, getFaceDescriptor } = require('./utils/faceUtils');
 const faceapi = require('face-api.js');
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 const upload = multer({ dest: 'uploads/' });
 
 (async () => {
-  await loadModels();
-  console.log("Modelos cargados");
+  await loadModels(); // ✅ Cargar modelos antes de levantar el servidor
+  console.log("✅ Modelos cargados, arrancando servidor...");
+  
+  app.listen(port, () => {
+    console.log(`🚀 Servidor activo en http://localhost:${port}`);
+  });
 })();
 
-app.post('/match-face', upload.single('image'), async (req, res) => {
-  try {
-    const imagePath = req.file.path;
+app.get('/api/say-hello', (req, res) => {
+  res.send("Hello World!");
+});
 
-    // Obtener descriptor del rostro de la imagen enviada
-    const input = await getFaceDescriptor(imagePath);
-    if (!input) {
+// 👇 Aquí va el endpoint
+app.post('/api/match-face', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No se recibió ninguna imagen' });
+    }
+
+    console.log('📥 Imagen recibida:', req.file.originalname);
+
+    const imagePath = req.file.path;
+    const inputDetection = await getFaceDescriptor(imagePath);
+
+    if (!inputDetection) {
       fs.unlinkSync(imagePath);
       return res.json({ FacesDetected: 0, matches: [] });
     }
 
-    // Obtener imágenes desde Firebase Storage y comparar
+    const inputDescriptor = inputDetection.descriptor;
+
     const snapshot = await db.collection('tbl_face').get();
     const matches = [];
 
     for (const doc of snapshot.docs) {
       const data = doc.data();
+      const tempImgPath = path.join('uploads', data.nombreImagen);
+      await bucket.file(`img/${data.nombreImagen}`).download({ destination: tempImgPath });
 
-      const filePath = path.join('uploads', data.nombreImagen);
-      const tempFile = fs.createWriteStream(filePath);
+      const storedDetection = await getFaceDescriptor(tempImgPath);
+      fs.unlinkSync(tempImgPath);
 
-      // Descargar imagen del Storage
-      await bucket.file(`img/${data.nombreImagen}`).download({ destination: filePath });
-
-      const storedFace = await getFaceDescriptor(filePath);
-      fs.unlinkSync(filePath);
-
-      if (storedFace) {
-        const distance = faceapi.euclideanDistance(input.descriptor, storedFace.descriptor);
+      if (storedDetection) {
+        const distance = faceapi.euclideanDistance(inputDescriptor, storedDetection.descriptor);
         if (distance < 0.6) {
           matches.push({
             label: data.label,
@@ -66,11 +77,7 @@ app.post('/match-face', upload.single('image'), async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error('❌ ERROR DETALLADO:', err);
     res.status(500).send("Error procesando la imagen.");
   }
-});
-
-app.listen(port, () => {
-  console.log(`Servidor en http://localhost:${port}`);
 });
