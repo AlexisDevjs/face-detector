@@ -25,7 +25,6 @@ app.get('/api/say-hello', (req, res) => {
   res.send("Hello World!");
 });
 
-// 👇 Aquí va el endpoint
 app.post('/api/match-face', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
@@ -33,43 +32,36 @@ app.post('/api/match-face', upload.single('image'), async (req, res) => {
     }
 
     console.log('📥 Imagen recibida:', req.file.originalname);
-
     const imagePath = req.file.path;
+
     const inputDetection = await getFaceDescriptor(imagePath);
+    fs.unlinkSync(imagePath); // eliminar imagen lo antes posible
 
     if (!inputDetection) {
-      fs.unlinkSync(imagePath);
       return res.json({ FacesDetected: 0, matches: [] });
     }
 
     const inputDescriptor = inputDetection.descriptor;
-
     const snapshot = await db.collection('tbl_face').get();
     const matches = [];
 
     for (const doc of snapshot.docs) {
       const data = doc.data();
-      const tempImgPath = path.join('uploads', data.nombreImagen);
-      await bucket.file(`img/${data.nombreImagen}`).download({ destination: tempImgPath });
+      if (!data.embedding) continue; // saltar si no hay vector guardado
 
-      const storedDetection = await getFaceDescriptor(tempImgPath);
-      fs.unlinkSync(tempImgPath);
+      const storedDescriptor = new Float32Array(data.embedding); // reconstruir el vector
+      const distance = faceapi.euclideanDistance(inputDescriptor, storedDescriptor);
 
-      if (storedDetection) {
-        const distance = faceapi.euclideanDistance(inputDescriptor, storedDetection.descriptor);
-        if (distance < 0.6) {
-          matches.push({
-            label: data.label,
-            cedula: data.cedula,
-            fechaNacimiento: data.fechaNacimiento,
-            tlfEmergencia: data.tlfEmergencia,
-            distance: parseFloat(distance.toFixed(3))
-          });
-        }
+      if (distance < 0.6) {
+        matches.push({
+          label: data.label,
+          cedula: data.cedula,
+          fechaNacimiento: data.fechaNacimiento,
+          tlfEmergencia: data.tlfEmergencia,
+          distance: parseFloat(distance.toFixed(3))
+        });
       }
     }
-
-    fs.unlinkSync(imagePath);
 
     return res.json({
       FacesDetected: 1,
@@ -81,3 +73,4 @@ app.post('/api/match-face', upload.single('image'), async (req, res) => {
     res.status(500).send("Error procesando la imagen.");
   }
 });
+

@@ -5,7 +5,6 @@ const path = require('path');
 const { Canvas, Image, ImageData } = canvas;
 faceapi.env.monkeyPatch({ Canvas, Image, ImageData });
 
-// 📦 Cargar modelos desde carpeta /models
 async function loadModels() {
   const MODEL_URL = path.join(__dirname, '..', 'models');
   console.log('📥 Cargando modelos desde:', MODEL_URL);
